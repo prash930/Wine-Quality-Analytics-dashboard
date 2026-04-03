@@ -3,19 +3,17 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-from plotly.subplots import make_subplots
 import warnings
-
 warnings.filterwarnings("ignore")
 
 # ─────────────────────────────────────────────
-# PAGE CONFIG
+# PAGE CONFIG  (no sidebar)
 # ─────────────────────────────────────────────
 st.set_page_config(
     page_title="VinIQ · Wine Quality Analytics",
     page_icon="🍷",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # ─────────────────────────────────────────────
@@ -25,43 +23,73 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-/* Root & background */
-html, body, .stApp, [data-testid="stAppViewContainer"],
-[data-testid="stHeader"], section[data-testid="stSidebar"],
-[data-testid="stSidebar"] > div:first-child {
+html, body, .stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stHeader"] {
     background: #0d0f18 !important;
     font-family: 'Inter', sans-serif !important;
 }
 
-/* Hide streamlit branding */
-#MainMenu, footer, header { visibility: hidden; }
+/* Hide only branding */
+#MainMenu, footer, header { visibility: hidden !important; }
 
-/* Sidebar */
-section[data-testid="stSidebar"] {
+/* Sidebar toggle arrow — always visible & styled */
+[data-testid="collapsedControl"] {
+    visibility: visible !important;
+    display: flex !important;
+    background: #a78bfa !important;
+    border-radius: 0 8px 8px 0 !important;
+    color: #fff !important;
+    width: 1.6rem !important;
+    box-shadow: 2px 0 12px rgba(167,139,250,0.4) !important;
+}
+[data-testid="collapsedControl"]:hover {
+    background: #7c3aed !important;
+}
+[data-testid="collapsedControl"] svg { stroke: #fff !important; }
+
+/* Sidebar background */
+section[data-testid="stSidebar"],
+section[data-testid="stSidebar"] > div:first-child {
     background: #12151f !important;
-    border-right: 1px solid #1e2235;
+    border-right: 1px solid #1e2235 !important;
 }
-section[data-testid="stSidebar"] * {
-    color: #c8cce0 !important;
-}
-section[data-testid="stSidebar"] .stSelectbox label,
-section[data-testid="stSidebar"] .stMultiSelect label,
-section[data-testid="stSidebar"] .stRadio label,
-section[data-testid="stSidebar"] .stSlider label,
-section[data-testid="stSidebar"] .stCheckbox label {
+section[data-testid="stSidebar"] * { color: #c8cce0 !important; }
+section[data-testid="stSidebar"] label {
     color: #8890b0 !important;
     font-size: 0.75rem !important;
     text-transform: uppercase;
     letter-spacing: 0.08em;
 }
 
-/* Select boxes, dropdowns */
+/* Expander – filter panel */
+[data-testid="stExpander"] {
+    background: #12151f !important;
+    border: 1px solid #1e2235 !important;
+    border-radius: 12px !important;
+}
+[data-testid="stExpander"] summary {
+    color: #c8cce0 !important;
+    font-weight: 600 !important;
+    font-size: 0.88rem !important;
+}
+
+/* Selectbox / multiselect */
 [data-testid="stSelectbox"] > div,
 [data-testid="stMultiSelect"] > div {
     background: #1a1d2e !important;
     border: 1px solid #2a2e45 !important;
     border-radius: 8px !important;
     color: #e0e4f0 !important;
+}
+
+/* Labels */
+label, .stSelectbox label, .stSlider label,
+.stCheckbox label, .stRadio label {
+    color: #8890b0 !important;
+    font-size: 0.75rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
 }
 
 /* Sliders */
@@ -103,23 +131,16 @@ section[data-testid="stSidebar"] .stCheckbox label {
     border-bottom: 2px solid #a78bfa !important;
 }
 
-/* Horizontal rule */
 hr { border-color: #1e2235 !important; }
 
-/* Block container */
-.block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; }
-
-/* DataFrames */
-[data-testid="stDataFrame"] { background: #13162a !important; }
-iframe { background: #13162a !important; }
-
-/* Plot bg override via css vars */
-:root {
-    --plot-bgcolor: #0d0f18;
-    --paper-bgcolor: #0d0f18;
+.block-container {
+    padding-top: 1.2rem !important;
+    padding-bottom: 1rem !important;
+    max-width: 1400px;
 }
 
-/* Scrollbar */
+[data-testid="stDataFrame"] { background: #13162a !important; }
+
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: #0d0f18; }
 ::-webkit-scrollbar-thumb { background: #2a2e4a; border-radius: 3px; }
@@ -128,34 +149,30 @@ iframe { background: #13162a !important; }
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# LOAD & PREPARE DATA
+# DATA  (cached once on startup)
 # ─────────────────────────────────────────────
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def load_data():
     import os
-    csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "winequality.csv")
-    df = pd.read_csv(csv_path)
-    return df
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "winequality.csv")
+    return pd.read_csv(path)
 
-@st.cache_data
-def remove_outliers_iqr(df):
-    feature_cols = [
+@st.cache_data(show_spinner=False)
+def clean_data(df: pd.DataFrame) -> pd.DataFrame:
+    cols = [
         'fixed acidity', 'volatile acidity', 'citric acid', 'residual sugar',
         'chlorides', 'free sulfur dioxide', 'total sulfur dioxide', 'density',
         'pH', 'sulphates', 'alcohol'
     ]
-    df_clean = df.copy()
-    for col in feature_cols:
-        Q1 = df_clean[col].quantile(0.25)
-        Q3 = df_clean[col].quantile(0.75)
-        IQR = Q3 - Q1
-        lb = Q1 - 1.5 * IQR
-        ub = Q3 + 1.5 * IQR
-        df_clean = df_clean[(df_clean[col] >= lb) & (df_clean[col] <= ub)]
-    return df_clean
+    out = df.copy()
+    for c in cols:
+        q1, q3 = out[c].quantile(0.25), out[c].quantile(0.75)
+        iqr = q3 - q1
+        out = out[(out[c] >= q1 - 1.5*iqr) & (out[c] <= q3 + 1.5*iqr)]
+    return out
 
-df_raw = load_data()
-df_clean = remove_outliers_iqr(df_raw)
+df_raw   = load_data()
+df_clean = clean_data(df_raw)
 
 NUMERIC_COLS = [
     'fixed acidity', 'volatile acidity', 'citric acid', 'residual sugar',
@@ -163,87 +180,98 @@ NUMERIC_COLS = [
     'pH', 'sulphates', 'alcohol'
 ]
 
-COLORS = {
-    "red":     "#e05f5f",
-    "white":   "#a78bfa",
-    "premium": "#34d399",
-    "avg":     "#fbbf24",
-    "accent1": "#60a5fa",
-    "accent2": "#f472b6",
-    "bg":      "#0d0f18",
-    "card":    "#13162a",
-    "border":  "#2a2e4a",
-    "text":    "#e8ecff",
-    "muted":   "#6b73a0",
+C = {   # colour palette
+    "red":    "#e05f5f", "white":  "#a78bfa",
+    "a1":     "#60a5fa", "a2":     "#f472b6",
+    "bg":     "#0d0f18", "card":   "#13162a",
+    "border": "#2a2e4a", "text":   "#e8ecff",
+    "muted":  "#6b73a0",
 }
 
-PLOTLY_LAYOUT = dict(
-    paper_bgcolor=COLORS["bg"],
-    plot_bgcolor=COLORS["card"],
-    font=dict(family="Inter", color=COLORS["text"]),
-    margin=dict(l=40, r=20, t=50, b=40),
-    legend=dict(
-        bgcolor="rgba(0,0,0,0)",
-        bordercolor=COLORS["border"],
-        borderwidth=1,
-    ),
+BASE_LAYOUT = dict(
+    paper_bgcolor=C["bg"], plot_bgcolor=C["card"],
+    font=dict(family="Inter", color=C["text"]),
+    margin=dict(l=40, r=20, t=46, b=36),
+    legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor=C["border"], borderwidth=1),
     xaxis=dict(gridcolor="#1e2235", zerolinecolor="#1e2235"),
     yaxis=dict(gridcolor="#1e2235", zerolinecolor="#1e2235"),
 )
 
+def layout(**overrides):
+    """Merge BASE_LAYOUT with overrides, safely."""
+    base = {k: v for k, v in BASE_LAYOUT.items()
+            if k not in overrides}
+    return {**base, **overrides}
+
 # ─────────────────────────────────────────────
-# SIDEBAR
+# SESSION STATE
 # ─────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("""
-    <div style='text-align:center; padding: 1rem 0 0.5rem 0;'>
-        <span style='font-size:2.2rem;'>🍷</span>
-        <h2 style='color:#e8ecff; margin:0.3rem 0 0 0; font-size:1.1rem; font-weight:700;'>Wine Quality</h2>
-        <p style='color:#6b73a0; font-size:0.72rem; margin:0;'>Analytics Dashboard</p>
-    </div>
-    <hr style='border-color:#1e2235; margin:0.8rem 0;'/>
-    """, unsafe_allow_html=True)
+if "sidebar_open" not in st.session_state:
+    st.session_state.sidebar_open = True
 
-    st.markdown("**📋 Filters**")
-
-    wine_type = st.selectbox("Wine Type", ["All", "Red", "White"])
-    remove_outliers = st.checkbox("Remove Outliers (IQR)", value=False)
-
-    quality_range = st.slider(
-        "Quality Score Range",
-        min_value=int(df_raw["quality"].min()),
-        max_value=int(df_raw["quality"].max()),
-        value=(int(df_raw["quality"].min()), int(df_raw["quality"].max()))
+# ─────────────────────────────────────────────
+# HEADER  +  sidebar toggle button
+# ─────────────────────────────────────────────
+hdr_title, hdr_btn = st.columns([11, 1])
+with hdr_title:
+    st.markdown(
+        "<div style='display:flex;align-items:center;gap:0.8rem;margin-bottom:0.2rem;'>"
+        "<span style='font-size:2.2rem;'>🍷</span>"
+        "<div><h1 style='color:#e8ecff;margin:0;font-size:1.6rem;font-weight:700;'>"
+        "VinIQ &nbsp;·&nbsp; Wine Quality Analytics</h1>"
+        "<p style='color:#6b73a0;margin:0;font-size:0.78rem;'>Interactive wine data explorer</p>"
+        "</div></div>",
+        unsafe_allow_html=True,
     )
-
-    alcohol_range = st.slider(
-        "Alcohol % Range",
-        min_value=float(df_raw["alcohol"].min()),
-        max_value=float(df_raw["alcohol"].max()),
-        value=(float(df_raw["alcohol"].min()), float(df_raw["alcohol"].max())),
-        step=0.1
-    )
-
-    st.markdown("<hr style='border-color:#1e2235; margin:0.8rem 0;'/>", unsafe_allow_html=True)
-    st.markdown("**🔍 Feature Explorer**")
-
-    x_feat = st.selectbox("X-Axis Feature", NUMERIC_COLS, index=NUMERIC_COLS.index("alcohol"))
-    y_feat = st.selectbox("Y-Axis Feature", NUMERIC_COLS, index=NUMERIC_COLS.index("volatile acidity"))
-
-    st.markdown("<hr style='border-color:#1e2235; margin:0.8rem 0;'/>", unsafe_allow_html=True)
-
-    color_by_quality = st.checkbox("Color Scatter by Quality", value=True)
-
-    st.markdown("<hr style='border-color:#1e2235; margin:0.8rem 0;'/>", unsafe_allow_html=True)
-
-    st.markdown("""
-    <p style='color:#6b73a0; font-size:0.7rem; text-align:center;'>
-        Data: winequality.csv<br/>Prashant's Wine Analytics
-    </p>
-    """, unsafe_allow_html=True)
+with hdr_btn:
+    st.markdown("<div style='height:0.5rem;'></div>", unsafe_allow_html=True)
+    btn_label = "✕ Hide" if st.session_state.sidebar_open else "☰ Filters"
+    if st.button(btn_label, key="sb_toggle", use_container_width=True):
+        st.session_state.sidebar_open = not st.session_state.sidebar_open
+        st.rerun()
 
 # ─────────────────────────────────────────────
-# FILTER DATA
+# FILTERS  — sidebar OR inline depending on toggle
+# ─────────────────────────────────────────────
+def _filter_widgets():
+    """Shared filter widgets. Must be called inside a container context."""
+    wt  = st.selectbox("Wine Type", ["All", "Red", "White"], key="wt")
+    ro  = st.checkbox("Remove Outliers (IQR)", value=False, key="ro")
+    q_min, q_max = int(df_raw["quality"].min()), int(df_raw["quality"].max())
+    qr  = st.slider("Quality Score Range", q_min, q_max, (q_min, q_max), key="qr")
+    a_min = float(df_raw["alcohol"].min())
+    a_max = float(df_raw["alcohol"].max())
+    ar  = st.slider("Alcohol % Range", a_min, a_max, (a_min, a_max), step=0.1, key="ar")
+    st.markdown("---")
+    xf  = st.selectbox("Scatter X", NUMERIC_COLS, index=NUMERIC_COLS.index("alcohol"), key="xf")
+    yf  = st.selectbox("Scatter Y", NUMERIC_COLS, index=NUMERIC_COLS.index("volatile acidity"), key="yf")
+    cbq = st.checkbox("Colour by Quality", value=True, key="cbq")
+    return wt, ro, qr, ar, xf, yf, cbq
+
+if st.session_state.sidebar_open:
+    # ── Actual left sidebar ──
+    with st.sidebar:
+        st.markdown(
+            "<div style='text-align:center;padding:1rem 0 0.4rem;'>"
+            "<span style='font-size:2rem;'>🍷</span>"
+            "<h2 style='color:#e8ecff;margin:0.2rem 0 0;font-size:1rem;font-weight:700;'>VinIQ</h2>"
+            "<p style='color:#6b73a0;font-size:0.68rem;margin:0;'>Wine Quality Analytics</p></div>"
+            "<hr style='border-color:#1e2235;margin:0.5rem 0;'/>"
+            "<p style='color:#8890b0;font-size:0.72rem;text-transform:uppercase;"
+            "letter-spacing:0.08em;margin:0 0 0.4rem;'>📋 Filters</p>",
+            unsafe_allow_html=True,
+        )
+        wine_type, remove_outliers, quality_range, \
+        alcohol_range, x_feat, y_feat, color_by_quality = _filter_widgets()
+else:
+    # ── Inline expandable panel (no sidebar) ──
+    with st.expander("⚙️  Filters & Settings", expanded=True):
+        wine_type, remove_outliers, quality_range, \
+        alcohol_range, x_feat, y_feat, color_by_quality = _filter_widgets()
+
+
+# ─────────────────────────────────────────────
+# APPLY FILTERS
 # ─────────────────────────────────────────────
 df_base = df_clean if remove_outliers else df_raw
 
@@ -262,52 +290,28 @@ df = df[
 df_red   = df[df["color"] == "red"]
 df_white = df[df["color"] == "white"]
 
-# ─────────────────────────────────────────────
-# HEADER
-# ─────────────────────────────────────────────
-outlier_badge = f" &nbsp;·&nbsp; <span style='background:#1e2235;padding:2px 8px;border-radius:4px;font-size:0.75rem;'>Outliers Removed</span>" if remove_outliers else ""
-header_html = (
-    f"<div style='display:flex;align-items:center;gap:1rem;margin-bottom:0.5rem;'>"
-    f"<span style='font-size:2.5rem;'>🍷</span>"
-    f"<div>"
-    f"<h1 style='color:#e8ecff;margin:0;font-size:1.7rem;font-weight:700;'>Wine Quality Dashboard</h1>"
-    f"<p style='color:#6b73a0;margin:0;font-size:0.82rem;'>Showing <b style='color:#a78bfa'>{len(df):,}</b> samples"
-    f" &nbsp;·&nbsp; <b style='color:{COLORS['red']}'>{len(df_red):,}</b> Red"
-    f" &nbsp;·&nbsp; <b style='color:{COLORS['white']}'>{len(df_white):,}</b> White"
-    f"{outlier_badge}</p>"
-    f"</div></div>"
-    f"<hr style='border-color:#1e2235;margin:0.4rem 0 1rem 0;'/>"
-)
-st.markdown(header_html, unsafe_allow_html=True)
-
-# ─────────────────────────────────────────────
-# KPI CARDS
-# ─────────────────────────────────────────────
 if len(df) == 0:
     st.warning("No data matches the current filters. Please adjust your selections.")
     st.stop()
 
-total_samples  = len(df)
-premium_wines  = len(df[df["quality"] >= 7])
-avg_quality    = round(df["quality"].mean(), 3)
-avg_alcohol    = round(df["alcohol"].mean(), 2)
-premium_pct    = round(premium_wines / total_samples * 100, 1)
-raw_total      = len(df_base)
+# ─────────────────────────────────────────────
+# KPI STRIP
+# ─────────────────────────────────────────────
+st.markdown("<hr style='border-color:#1e2235;margin:0.5rem 0 0.8rem 0;'/>", unsafe_allow_html=True)
 
-c1, c2, c3, c4, c5 = st.columns(5)
-with c1:
-    st.metric("Total Samples",    f"{total_samples:,}",    f"{total_samples - raw_total:+,} vs full")
-with c2:
-    st.metric("Premium (≥7)",     f"{premium_wines:,}",    f"{premium_pct}% share")
-with c3:
-    st.metric("Avg Quality Score", avg_quality,            f"Max {int(df['quality'].max())}")
-with c4:
-    st.metric("Avg Alcohol %",    avg_alcohol,             f"Δ {round(df['alcohol'].std(),2)} σ")
-with c5:
-    red_pct = round(len(df_red)/len(df)*100, 1) if len(df) > 0 else 0
-    st.metric("Red vs White",     f"{red_pct}% Red",       f"{round(100-red_pct,1)}% White")
+total   = len(df)
+premium = len(df[df["quality"] >= 7])
+prem_pct = round(premium / total * 100, 1)
+red_pct  = round(len(df_red) / total * 100, 1)
 
-st.markdown("---")
+k1, k2, k3, k4, k5 = st.columns(5)
+k1.metric("Total Samples",     f"{total:,}",             f"{total - len(df_base):+,} vs full")
+k2.metric("Premium (≥ 7)",     f"{premium:,}",           f"{prem_pct}% share")
+k3.metric("Avg Quality Score", f"{df['quality'].mean():.3f}", f"Max {int(df['quality'].max())}")
+k4.metric("Avg Alcohol %",     f"{df['alcohol'].mean():.2f}", f"σ {df['alcohol'].std():.2f}")
+k5.metric("Red / White",       f"{red_pct}% Red",        f"{100-red_pct:.1f}% White")
+
+st.markdown("<hr style='border-color:#1e2235;margin:0.8rem 0;'/>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 # TABS
@@ -317,174 +321,112 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # ══════════════════════════════════════════════
-# TAB 1 – OVERVIEW (candlestick-style + donut)
+# TAB 1 – OVERVIEW
 # ══════════════════════════════════════════════
 with tab1:
     col_a, col_b = st.columns([3, 1])
 
+    # ── Quality bar chart ──
     with col_a:
-        # Quality Distribution – bar / band chart
-        quality_counts = df.groupby(["quality", "color"]).size().reset_index(name="count")
-        
-        fig_band = go.Figure()
-        
-        for color_val, line_color, fill_color in [
-            ("red",   COLORS["red"],   "rgba(224,95,95,0.3)"),
-            ("white", COLORS["white"], "rgba(167,139,250,0.3)"),
-        ]:
-            sub = quality_counts[quality_counts["color"] == color_val].sort_values("quality")
+        qc = df.groupby(["quality", "color"]).size().reset_index(name="n")
+        fig = go.Figure()
+        for cv, lc, off in [("red", C["red"], -0.22), ("white", C["white"], 0.22)]:
+            sub = qc[qc["color"] == cv].sort_values("quality")
             if len(sub):
-                fig_band.add_trace(go.Bar(
-                    x=sub["quality"],
-                    y=sub["count"],
-                    name=color_val.capitalize(),
-                    marker_color=line_color,
-                    opacity=0.85,
-                    width=0.4,
-                    offset=-0.22 if color_val == "red" else 0.22,
-                ))
-        
-        fig_band.update_layout(
-            title="Quality Score Distribution by Wine Type",
-            **PLOTLY_LAYOUT,
-            barmode="overlay",
-            xaxis_title="Quality Score",
-            yaxis_title="Count",
-        )
-        st.plotly_chart(fig_band, use_container_width=True)
+                fig.add_trace(go.Bar(x=sub["quality"], y=sub["n"], name=cv.capitalize(),
+                                     marker_color=lc, opacity=0.87, width=0.4, offset=off))
+        fig.update_layout(title="Quality Score Distribution by Wine Type",
+                          **layout(barmode="overlay", xaxis_title="Quality Score", yaxis_title="Count"))
+        st.plotly_chart(fig, use_container_width=True)
 
+    # ── Donut ──
     with col_b:
-        # Donut – Red vs White
-        fig_donut = go.Figure(go.Pie(
-            labels=["Red", "White"],
-            values=[len(df_red), len(df_white)],
+        fig2 = go.Figure(go.Pie(
+            labels=["Red", "White"], values=[len(df_red), len(df_white)],
             hole=0.62,
-            marker=dict(colors=[COLORS["red"], COLORS["white"]],
-                        line=dict(color=COLORS["bg"], width=3)),
-            textinfo="percent+label",
-            textfont=dict(color=COLORS["text"], size=11),
+            marker=dict(colors=[C["red"], C["white"]], line=dict(color=C["bg"], width=3)),
+            textinfo="percent+label", textfont=dict(color=C["text"], size=11),
             showlegend=False,
         ))
-        fig_donut.update_layout(
-            title="Color Split",
-            **{k: v for k, v in PLOTLY_LAYOUT.items() if k not in ("xaxis", "yaxis", "margin")},
-            margin=dict(l=10, r=10, t=50, b=10),
-            annotations=[dict(
-                text=f"<b>{total_samples:,}</b><br>wines",
-                x=0.5, y=0.5, font_size=13, font_color=COLORS["text"],
-                showarrow=False
-            )],
+        fig2.update_layout(
+            title="Colour Split",
+            **layout(xaxis=None, yaxis=None, margin=dict(l=10, r=10, t=50, b=10)),
+            annotations=[dict(text=f"<b>{total:,}</b><br>wines",
+                              x=0.5, y=0.5, font_size=12, font_color=C["text"], showarrow=False)],
             height=320,
         )
-        st.plotly_chart(fig_donut, use_container_width=True)
+        st.plotly_chart(fig2, use_container_width=True)
 
-    # ── Quality by Wine Type – Violin ──
-    fig_violin = go.Figure()
-    for color_val, vc in [("red", COLORS["red"]), ("white", COLORS["white"])]:
-        sub = df[df["color"] == color_val]
+    # ── Violin ──
+    fig3 = go.Figure()
+    for cv, vc in [("red", C["red"]), ("white", C["white"])]:
+        sub = df[df["color"] == cv]
         if len(sub):
-            fig_violin.add_trace(go.Violin(
-                x=sub["color"].str.capitalize(),
-                y=sub["quality"],
-                name=color_val.capitalize(),
-                line_color=vc,
-                fillcolor=vc.replace(")", ",0.2)").replace("rgb", "rgba") if "rgb" in vc else vc,
-                box_visible=True,
-                meanline_visible=True,
-                points="outliers",
-                pointpos=0,
+            fig3.add_trace(go.Violin(
+                x=sub["color"].str.capitalize(), y=sub["quality"],
+                name=cv.capitalize(), line_color=vc,
+                box_visible=True, meanline_visible=True,
+                points="outliers", pointpos=0,
                 marker=dict(color=vc, opacity=0.4, size=3),
             ))
-    fig_violin.update_layout(
-        title="Quality Distribution (Violin)",
-        **PLOTLY_LAYOUT,
-        yaxis_title="Quality Score",
-        violingap=0.3,
-        violinmode="overlay",
-    )
-    st.plotly_chart(fig_violin, use_container_width=True)
+    fig3.update_layout(title="Quality Distribution – Violin",
+                       **layout(yaxis_title="Quality Score",
+                                violingap=0.3, violinmode="overlay"))
+    st.plotly_chart(fig3, use_container_width=True)
 
-    # ── Avg feature by quality ──
-    st.markdown("#### 📊 Average Feature Values by Quality Score")
-    avg_by_quality = df.groupby("quality")[NUMERIC_COLS].mean().reset_index()
-
-    fig_heat = go.Figure(go.Heatmap(
-        z=avg_by_quality[NUMERIC_COLS].T.values,
-        x=avg_by_quality["quality"].astype(str),
-        y=NUMERIC_COLS,
-        colorscale="Viridis",
-        colorbar=dict(tickfont=dict(color=COLORS["text"])),
-        text=np.round(avg_by_quality[NUMERIC_COLS].T.values, 2),
-        texttemplate="%{text}",
+    # ── Heatmap: avg feature per quality ──
+    st.markdown("#### 📊 Average Feature Values by Quality Grade")
+    avg_q = df.groupby("quality")[NUMERIC_COLS].mean()
+    fig4 = go.Figure(go.Heatmap(
+        z=avg_q.T.values, x=avg_q.index.astype(str), y=NUMERIC_COLS,
+        colorscale="Viridis", colorbar=dict(tickfont=dict(color=C["text"])),
+        text=np.round(avg_q.T.values, 2), texttemplate="%{text}",
         textfont=dict(size=8, color="white"),
     ))
-    fig_heat.update_layout(
-        title="Mean Feature Values per Quality Grade",
-        **{k: v for k, v in PLOTLY_LAYOUT.items() if k not in ("xaxis", "yaxis")},
-        xaxis=dict(title="Quality Score", gridcolor="#1e2235"),
-        yaxis=dict(autorange="reversed", gridcolor="#1e2235"),
-        height=380,
-    )
-    st.plotly_chart(fig_heat, use_container_width=True)
+    fig4.update_layout(title="Mean Feature Values per Quality Grade",
+                       **layout(xaxis=dict(title="Quality Score", gridcolor="#1e2235"),
+                                yaxis=dict(autorange="reversed", gridcolor="#1e2235"),
+                                height=380))
+    st.plotly_chart(fig4, use_container_width=True)
 
 # ══════════════════════════════════════════════
-# TAB 2 – DISTRIBUTIONS (histograms)
+# TAB 2 – DISTRIBUTIONS
 # ══════════════════════════════════════════════
 with tab2:
-    feat_hist = st.selectbox("Select feature to inspect", NUMERIC_COLS, key="hist_feat")
-    nbins_val = st.slider("Number of bins", 10, 100, 40, key="nbins")
+    fc_a, fc_b = st.columns([2, 1])
+    with fc_a:
+        feat_hist = st.selectbox("Feature to inspect", NUMERIC_COLS, key="hist_feat")
+    with fc_b:
+        nbins_val = st.slider("Bins", 10, 100, 40, key="nbins")
 
     col2a, col2b = st.columns(2)
 
     with col2a:
-        # Overlaid histogram Red vs White
-        fig_hist = go.Figure()
-        for color_val, vc in [("red", COLORS["red"]), ("white", COLORS["white"])]:
-            sub = df[df["color"] == color_val]
+        fig5 = go.Figure()
+        for cv, vc in [("red", C["red"]), ("white", C["white"])]:
+            sub = df[df["color"] == cv]
             if len(sub):
-                fig_hist.add_trace(go.Histogram(
-                    x=sub[feat_hist],
-                    name=color_val.capitalize(),
-                    marker_color=vc,
-                    opacity=0.70,
-                    nbinsx=nbins_val,
-                ))
-        fig_hist.update_layout(
-            title=f"{feat_hist} – Distribution",
-            barmode="overlay",
-            **PLOTLY_LAYOUT,
-            xaxis_title=feat_hist,
-            yaxis_title="Count",
-        )
-        st.plotly_chart(fig_hist, use_container_width=True)
+                fig5.add_trace(go.Histogram(x=sub[feat_hist], name=cv.capitalize(),
+                                            marker_color=vc, opacity=0.70, nbinsx=nbins_val))
+        fig5.update_layout(title=f"{feat_hist} – Distribution", barmode="overlay",
+                           **layout(xaxis_title=feat_hist, yaxis_title="Count"))
+        st.plotly_chart(fig5, use_container_width=True)
 
     with col2b:
-        # Box plot per quality
-        fig_box = go.Figure()
-        color_sequence = px.colors.sequential.Viridis
-        qualities = sorted(df["quality"].unique())
-        for i, q in enumerate(qualities):
-            sub = df[df["quality"] == q]
-            cidx = int(i / max(len(qualities)-1, 1) * (len(color_sequence)-1))
-            fig_box.add_trace(go.Box(
-                y=sub[feat_hist],
-                name=f"Q{int(q)}",
-                marker_color=color_sequence[cidx],
-                boxmean=True,
-            ))
-        fig_box.update_layout(
-            title=f"{feat_hist} by Quality Score",
-            **PLOTLY_LAYOUT,
-            yaxis_title=feat_hist,
-            showlegend=False,
-        )
-        st.plotly_chart(fig_box, use_container_width=True)
+        fig6 = go.Figure()
+        cseq = px.colors.sequential.Viridis
+        qs   = sorted(df["quality"].unique())
+        for i, q in enumerate(qs):
+            cidx = int(i / max(len(qs)-1, 1) * (len(cseq)-1))
+            fig6.add_trace(go.Box(y=df[df["quality"]==q][feat_hist],
+                                  name=f"Q{int(q)}", marker_color=cseq[cidx], boxmean=True))
+        fig6.update_layout(title=f"{feat_hist} by Quality",
+                           **layout(yaxis_title=feat_hist, showlegend=False))
+        st.plotly_chart(fig6, use_container_width=True)
 
-    # ── Summary statistics table ──
     st.markdown("#### 📋 Descriptive Statistics")
-    stats_df = df[NUMERIC_COLS + ["quality"]].describe().round(4)
     st.dataframe(
-        stats_df.style.background_gradient(cmap="Blues", axis=1),
+        df[NUMERIC_COLS + ["quality"]].describe().round(4).style.background_gradient(cmap="Blues", axis=1),
         use_container_width=True,
     )
 
@@ -492,204 +434,129 @@ with tab2:
 # TAB 3 – CORRELATIONS
 # ══════════════════════════════════════════════
 with tab3:
-    corr_cols = NUMERIC_COLS + ["quality"]
-    corr = df[corr_cols].corr().round(3)
+    corr = df[NUMERIC_COLS + ["quality"]].corr().round(3)
 
-    fig_corr = go.Figure(go.Heatmap(
-        z=corr.values,
-        x=corr.columns.tolist(),
-        y=corr.columns.tolist(),
-        colorscale="RdBu",
-        zmid=0,
-        text=corr.values.round(2),
-        texttemplate="%{text}",
+    fig7 = go.Figure(go.Heatmap(
+        z=corr.values, x=corr.columns.tolist(), y=corr.columns.tolist(),
+        colorscale="RdBu", zmid=0,
+        text=corr.values.round(2), texttemplate="%{text}",
         textfont=dict(size=8, color="white"),
-        colorbar=dict(tickfont=dict(color=COLORS["text"])),
+        colorbar=dict(tickfont=dict(color=C["text"])),
     ))
-    fig_corr.update_layout(
-        title="Feature Correlation Matrix",
-        **{k: v for k, v in PLOTLY_LAYOUT.items() if k not in ("xaxis", "yaxis")},
-        xaxis=dict(tickangle=-45, gridcolor="#1e2235"),
-        yaxis=dict(autorange="reversed", gridcolor="#1e2235"),
-        height=520,
-    )
-    st.plotly_chart(fig_corr, use_container_width=True)
+    fig7.update_layout(title="Feature Correlation Matrix",
+                       **layout(xaxis=dict(tickangle=-45, gridcolor="#1e2235"),
+                                yaxis=dict(autorange="reversed", gridcolor="#1e2235"),
+                                height=520))
+    st.plotly_chart(fig7, use_container_width=True)
 
-    # Top correlations with quality
     st.markdown("#### 🏆 Top Correlations with Quality Score")
-    corr_quality = corr["quality"].drop("quality").sort_values(key=abs, ascending=False)
-    
-    colors_bar = [COLORS["accent1"] if v >= 0 else COLORS["accent2"] for v in corr_quality.values]
-    fig_bar_corr = go.Figure(go.Bar(
-        x=corr_quality.index,
-        y=corr_quality.values,
-        marker_color=colors_bar,
-        text=corr_quality.values.round(3),
-        textposition="outside",
-        textfont=dict(color=COLORS["text"], size=10),
-    ))
-    fig_bar_corr.update_layout(
-        title="Correlation with Quality Score",
-        **{k: v for k, v in PLOTLY_LAYOUT.items() if k not in ("yaxis",)},
-        xaxis_title="Feature",
-        yaxis_title="Pearson r",
-        yaxis=dict(range=[-1, 1], gridcolor="#1e2235"),
-    )
-    st.plotly_chart(fig_bar_corr, use_container_width=True)
+    cq     = corr["quality"].drop("quality").sort_values(key=abs, ascending=False)
+    cbars  = [C["a1"] if v >= 0 else C["a2"] for v in cq.values]
+    fig8   = go.Figure(go.Bar(x=cq.index, y=cq.values, marker_color=cbars,
+                              text=cq.values.round(3), textposition="outside",
+                              textfont=dict(color=C["text"], size=10)))
+    fig8.update_layout(title="Correlation with Quality Score",
+                       **layout(xaxis_title="Feature", yaxis_title="Pearson r",
+                                yaxis=dict(range=[-1, 1], gridcolor="#1e2235")))
+    st.plotly_chart(fig8, use_container_width=True)
 
 # ══════════════════════════════════════════════
-# TAB 4 – FEATURE EXPLORER (scatter + parallel)
+# TAB 4 – FEATURE EXPLORER
 # ══════════════════════════════════════════════
 with tab4:
     col4a, col4b = st.columns([3, 1])
 
     with col4a:
         if color_by_quality:
-            color_vals = df["quality"]
-            color_name = "quality"
-            cscale = "Viridis"
+            cvals, cname, cscale = df["quality"], "Quality", "Viridis"
         else:
-            color_vals = df["color"].map({"red": 0, "white": 1})
-            color_name = "color (0=red,1=white)"
-            cscale = [[0, COLORS["red"]], [1, COLORS["white"]]]
+            cvals = df["color"].map({"red": 0, "white": 1})
+            cname, cscale = "Color (0=red,1=white)", [[0, C["red"]], [1, C["white"]]]
 
-        fig_scatter = go.Figure(go.Scatter(
-            x=df[x_feat],
-            y=df[y_feat],
-            mode="markers",
-            marker=dict(
-                color=color_vals,
-                colorscale=cscale,
-                size=5,
-                opacity=0.65,
-                colorbar=dict(title=color_name, tickfont=dict(color=COLORS["text"])),
-                showscale=True,
-            ),
+        fig9 = go.Figure(go.Scatter(
+            x=df[x_feat], y=df[y_feat], mode="markers",
+            marker=dict(color=cvals, colorscale=cscale, size=5, opacity=0.65,
+                        colorbar=dict(title=cname, tickfont=dict(color=C["text"])),
+                        showscale=True),
             text=[f"Quality: {q}<br>Wine: {c}" for q, c in zip(df["quality"], df["color"])],
             hovertemplate=f"{x_feat}: %{{x:.3f}}<br>{y_feat}: %{{y:.3f}}<br>%{{text}}<extra></extra>",
         ))
-        fig_scatter.update_layout(
-            title=f"{x_feat} vs {y_feat}",
-            **PLOTLY_LAYOUT,
-            xaxis_title=x_feat,
-            yaxis_title=y_feat,
-            height=480,
-        )
-        st.plotly_chart(fig_scatter, use_container_width=True)
+        fig9.update_layout(title=f"{x_feat}  vs  {y_feat}",
+                           **layout(xaxis_title=x_feat, yaxis_title=y_feat, height=460))
+        st.plotly_chart(fig9, use_container_width=True)
 
     with col4b:
-        # Feature stats for selected axis
-        st.markdown(f"**{x_feat} Stats**")
-        for label, val in [
-            ("Mean", df[x_feat].mean()),
-            ("Median", df[x_feat].median()),
-            ("Std Dev", df[x_feat].std()),
-            ("Min", df[x_feat].min()),
-            ("Max", df[x_feat].max()),
-            ("Skewness", df[x_feat].skew()),
-        ]:
-            st.markdown(
-                f"<div style='display:flex;justify-content:space-between;"
-                f"padding:0.22rem 0;border-bottom:1px solid #1e2235;'>"
-                f"<span style='color:#6b73a0;font-size:0.8rem;'>{label}</span>"
-                f"<span style='color:#e8ecff;font-weight:500;font-size:0.8rem;'>{val:.3f}</span>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-        st.markdown("<br/>", unsafe_allow_html=True)
-        st.markdown(f"**{y_feat} Stats**")
-        for label, val in [
-            ("Mean", df[y_feat].mean()),
-            ("Median", df[y_feat].median()),
-            ("Std Dev", df[y_feat].std()),
-            ("Min", df[y_feat].min()),
-            ("Max", df[y_feat].max()),
-            ("Skewness", df[y_feat].skew()),
-        ]:
-            st.markdown(
-                f"<div style='display:flex;justify-content:space-between;"
-                f"padding:0.22rem 0;border-bottom:1px solid #1e2235;'>"
-                f"<span style='color:#6b73a0;font-size:0.8rem;'>{label}</span>"
-                f"<span style='color:#e8ecff;font-weight:500;font-size:0.8rem;'>{val:.3f}</span>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
+        for feat_label, feat_col in [(f"📌 {x_feat}", x_feat), (f"📌 {y_feat}", y_feat)]:
+            st.markdown(f"**{feat_label}**")
+            for lbl, val in [
+                ("Mean",     df[feat_col].mean()),
+                ("Median",   df[feat_col].median()),
+                ("Std Dev",  df[feat_col].std()),
+                ("Min",      df[feat_col].min()),
+                ("Max",      df[feat_col].max()),
+                ("Skewness", df[feat_col].skew()),
+            ]:
+                st.markdown(
+                    f"<div style='display:flex;justify-content:space-between;"
+                    f"padding:0.2rem 0;border-bottom:1px solid #1e2235;'>"
+                    f"<span style='color:#6b73a0;font-size:0.78rem;'>{lbl}</span>"
+                    f"<span style='color:#e8ecff;font-weight:500;font-size:0.78rem;'>{val:.3f}</span>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            st.markdown("<br/>", unsafe_allow_html=True)
 
-    # ── Parallel coordinates ──
-    st.markdown("#### 🔀 Parallel Coordinates – All Features")
-    pc_cols = NUMERIC_COLS + ["quality"]
-    # Sample if large
-    sample_df = df if len(df) <= 2000 else df.sample(2000, random_state=42)
-
-    fig_pc = go.Figure(go.Parcoords(
-        line=dict(
-            color=sample_df["quality"],
-            colorscale="Viridis",
-            showscale=True,
-            colorbar=dict(title="Quality", tickfont=dict(color=COLORS["text"])),
-        ),
-        dimensions=[
-            dict(label=col.replace(" ", "<br>"), values=sample_df[col])
-            for col in pc_cols
-        ],
-        labelangle=-15,
-        labelside="bottom",
+    # ── Parallel Coordinates ──
+    st.markdown("#### 🔀 Parallel Coordinates")
+    sdf = df if len(df) <= 2000 else df.sample(2000, random_state=42)
+    fig10 = go.Figure(go.Parcoords(
+        line=dict(color=sdf["quality"], colorscale="Viridis", showscale=True,
+                  colorbar=dict(title="Quality", tickfont=dict(color=C["text"]))),
+        dimensions=[dict(label=c.replace(" ", "<br>"), values=sdf[c])
+                    for c in NUMERIC_COLS + ["quality"]],
+        labelangle=-15, labelside="bottom",
     ))
-    fig_pc.update_layout(
-        title="Parallel Coordinates (up to 2 000 samples)",
-        **{k: v for k, v in PLOTLY_LAYOUT.items() if k not in ("xaxis", "yaxis", "margin")},
-        height=450,
-        margin=dict(l=60, r=40, t=60, b=80),
-    )
-    st.plotly_chart(fig_pc, use_container_width=True)
+    fig10.update_layout(title="Parallel Coordinates (≤ 2 000 rows)",
+                        **layout(xaxis=None, yaxis=None, height=440,
+                                 margin=dict(l=60, r=40, t=56, b=80)))
+    st.plotly_chart(fig10, use_container_width=True)
 
-    # ── Radar chart per quality group ──
-    st.markdown("#### 🕸️ Radar – Avg Normalised Features by Quality Grade")
-    min_vals = df[NUMERIC_COLS].min()
-    max_vals = df[NUMERIC_COLS].max()
-    norm_df  = (df[NUMERIC_COLS] - min_vals) / (max_vals - min_vals + 1e-9)
-    norm_df["quality"] = df["quality"]
-    radar_data = norm_df.groupby("quality").mean().reset_index()
+    # ── Radar ──
+    st.markdown("#### 🕸️ Normalised Feature Radar by Quality Grade")
+    mn, mx = df[NUMERIC_COLS].min(), df[NUMERIC_COLS].max()
+    ndf = (df[NUMERIC_COLS] - mn) / (mx - mn + 1e-9)
+    ndf["quality"] = df["quality"].values
+    radar = ndf.groupby("quality").mean().reset_index()
+    rcols = px.colors.sequential.Viridis
+    rqs   = sorted(radar["quality"].unique())
 
-    radar_qualities = sorted(radar_data["quality"].unique())
-    radar_colors    = px.colors.sequential.Viridis
-
-    fig_radar = go.Figure()
-    for i, q in enumerate(radar_qualities):
-        row = radar_data[radar_data["quality"] == q].iloc[0]
+    fig11 = go.Figure()
+    for i, q in enumerate(rqs):
+        row  = radar[radar["quality"] == q].iloc[0]
         vals = [row[c] for c in NUMERIC_COLS] + [row[NUMERIC_COLS[0]]]
         labs = NUMERIC_COLS + [NUMERIC_COLS[0]]
-        cidx = int(i / max(len(radar_qualities)-1, 1) * (len(radar_colors)-1))
-        fig_radar.add_trace(go.Scatterpolar(
+        cidx = int(i / max(len(rqs)-1, 1) * (len(rcols)-1))
+        clr  = rcols[cidx]
+        fig11.add_trace(go.Scatterpolar(
             r=vals, theta=labs, name=f"Quality {int(q)}",
-            line=dict(color=radar_colors[cidx], width=2),
-            fill="toself",
-            fillcolor=radar_colors[cidx].replace("rgb", "rgba").replace(")", ",0.08)") if "rgb" in radar_colors[cidx] else radar_colors[cidx],
+            line=dict(color=clr, width=2), fill="toself",
+            fillcolor=clr.replace("rgb","rgba").replace(")",",.08)") if "rgb" in clr else clr,
         ))
-    fig_radar.update_layout(
-        title="Normalised Feature Profile by Quality",
-        **{k: v for k, v in PLOTLY_LAYOUT.items() if k not in ("xaxis", "yaxis")},
-        polar=dict(
-            bgcolor=COLORS["card"],
-            radialaxis=dict(gridcolor="#2a2e4a", tickfont=dict(color=COLORS["muted"])),
-            angularaxis=dict(gridcolor="#2a2e4a", tickfont=dict(color=COLORS["muted"])),
-        ),
-        height=480,
-    )
-    st.plotly_chart(fig_radar, use_container_width=True)
+    fig11.update_layout(title="Normalised Feature Profile by Quality",
+                        **layout(xaxis=None, yaxis=None, height=460,
+                                 polar=dict(
+                                     bgcolor=C["card"],
+                                     radialaxis=dict(gridcolor="#2a2e4a", tickfont=dict(color=C["muted"])),
+                                     angularaxis=dict(gridcolor="#2a2e4a", tickfont=dict(color=C["muted"])),
+                                 )))
+    st.plotly_chart(fig11, use_container_width=True)
 
 # ══════════════════════════════════════════════
 # TAB 5 – DATA TABLE
 # ══════════════════════════════════════════════
 with tab5:
-    st.markdown(f"Displaying **{len(df):,}** rows")
+    st.markdown(f"Displaying **{total:,}** rows")
     st.dataframe(df.reset_index(drop=True), use_container_width=True, height=500)
-    
-    # Download
+
     csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="⬇️  Download Filtered CSV",
-        data=csv,
-        file_name="wine_filtered.csv",
-        mime="text/csv",
-    )
+    st.download_button("⬇️  Download Filtered CSV", csv, "wine_filtered.csv", "text/csv")
